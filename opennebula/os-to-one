@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# 
+# Purposes: export an openstack instance, and upload to opennebula
+# Quick and dirty script, to be kicked manually to control.
+# Not scaling but just needed to export a dozen instance and does the job
+# Requirements:
+#  - launched from openstack/glance server (for local snapshot access)
+#  - ssh access to opennebula (frontend *and* hosts) to import where needed the snapshot
+#  - opennebula template to use to know which flavor to create the one vm from (for vcpus/mem)
+
+
+os_vm="$1"
+source ~/openrc
+ssh_user="oneadmin"
+one_controller="ip.address"
+one_dns_resolver="ip.address"
+
+if [ -z "${os_vm}" ] ;then
+  echo "usage: $0 <vm_name>"
+  echo "You have to call this script with the OpenStack instance name to migrate"
+  exit 1
+fi
+
+echo "[+] Provisioning first an instance in Opennebula to get ip/context setup ..."
+one_id=$(ssh ${ssh_user}@${one_controller} "onetemplate instantiate 0 --name ${os_vm}"|awk '{print $3}')
+sleep 20
+one_hypervisor=$(ssh ${ssh_user}@${one_controller} "onevm show ${one_id} |grep HOST|head -n 1" |awk '{print $3}')
+one_ip=$(ssh ${ssh_user}@${one_controller} "onevm show ${one_id} |grep ETH0_IP=" |cut -f 2 -d '='|tr -d ','|tr -d '"'|tr -d '\n')
+one_hypervisor_ip=$(dig +short @${one_dns_resolver} ${one_hypervisor})
+echo "[+] Provisioned ONE instance is using IP [${one_ip}] and running on hypervisor [${one_hypervisor} / ${one_hypervisor_ip}]"
+echo "[+] Powering off now opennebula instance ${one_id}"
+ssh ${ssh_user}@${one_controller} "onevm poweroff --hard ${os_vm}"
+
+echo "[+] Preparing the Openstack instance migration"
+vm_uuid=$(openstack server list --all-projects -f value -c ID -c Name|grep ${os_vm}|awk '{print $1}')
+echo "[+] Powering off and creating Snapshot for VM ${os_vm} with uuid ${vm_uuid} ..."
+openstack server stop ${vm_uuid}
+openstack server image create --name snap_${os_vm} --wait ${vm_uuid} > /dev/null
+
+echo "[+] Finding image ID for snap_${os_vm}"
+image_id=$(openstack image list -f value |grep snap_${os_vm}|awk '{print $1}'|head -n 1)
+echo "[+] Uploading ${image_id} qcow2 to target hypervisor ${one_hypervisor} ..."
+ssh ${ssh_user}@${one_hypervisor_ip} "rm /var/lib/one/datastores/0/${one_id}/disk.0"
+rsync -avS --progress /var/lib/glance/images/${image_id} oneadmin@${one_hypervisor_ip}:/var/lib/one/datastores/0/${one_id}/disk.0 --progress
+
+echo "[+] Resuming/starting ${os_vm} in Opennebula ..."
+ssh ${ssh_user}@${one_controller} "onevm resume ${os_vm}"
+echo "[+] Your imported instance ${os_vm} should be available soon with ip ${one_ip}"
+
