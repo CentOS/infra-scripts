@@ -1,0 +1,18 @@
+#!/bin/bash
+echo ""
+read -p "Pagure Git project name to create : " repo
+read -p "Project Description: " description
+read -p "Pagure namespace (like 'rpms'): " namespace
+read -p "Which environment (like 'dev'): " config_file
+
+if [ -e ~/.pagure-${config_file}.cfg ] ;then
+  source ~/.pagure-${config_file}.cfg
+else
+  echo "You need to create a ~/.pagure-${config_file}.cfg file with the following settings:"
+  echo "pagure_url=    # main url like https://git.dev.centos.org"
+  echo "pagure_token=  # your pagure API token for that instance"
+  exit 1
+fi
+
+curl -H "Authorization: token ${pagure_token}" -H "Content-Type: application/x-www-form-urlencoded" -X POST -d "name=${repo}&description=${description}&namespace=${namespace}" "${pagure_url}/api/0/new/"
+
