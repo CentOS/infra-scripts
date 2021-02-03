@@ -1,0 +1,35 @@
+#!/bin/bash
+
+cbs_cmd="koji --config ~/.koji/cbs.conf"
+
+if [ -z "$1" ] ; then
+  echo "usage: $(basename $0) <tag> <source> <dest> (like 'infra7-gitforge-pagure candidate testing')"
+  exit 1
+fi
+
+basetag="$1"
+source="$2"
+target="$3"
+
+tmp_dir=$(mktemp -d)
+pushd ${tmp_dir} > /dev/null
+echo "[+] Generating lists for ${basetag}-${source} and ${basetag}-${target} "
+${cbs_cmd} list-tagged ${basetag}-${source} --quiet|awk '{print $1}'|sort > ${basetag}-${source}.list
+${cbs_cmd} list-tagged ${basetag}-${target} --quiet|awk '{print $1}'|sort > ${basetag}-${target}.list
+pkgs_to_tag=$(comm -3 ${basetag}-${source}.list ${basetag}-${target}.list)
+if [ -z "${pkgs_to_tag}" ] ; then
+  echo "[+] no untagged pkg found so skipping ..."
+else
+  echo "[+] Tagging following pkgs to ${basetag}-${target} : "
+  echo "==="
+  echo "${pkgs_to_tag}"
+  echo "==="
+  read -p "[+] Do you want to proceed ? [y/n] : " release_push
+  if [ "$release_push" == "y" ] ; then
+    ${cbs_cmd} tag-build ${basetag}-${target} ${pkgs_to_tag}
+  else
+    echo "[+] Cancelled so exiting ..."
+  fi
+fi
+popd > /dev/null
+rm -Rf ${tmp_dir}
