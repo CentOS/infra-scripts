@@ -1,9 +1,20 @@
 #!/bin/bash
-echo ""
-read -p "Pagure Git project name to create : " repo
-read -p "Project Description: " description
-read -p "Pagure namespace (like 'rpms'): " namespace
-read -p "Which environment (like 'dev'): " config_file
+
+# Call this script in for batch and while read loop
+# $1: project to create (like 'httpd')
+# $2: description (like 'the apache rpm')
+# $3: namespace (like 'rpms')
+# $4: config_file to use like ~/.pagure-${config_file} (like 'prod')
+
+repo="$1"
+description="$2"
+namespace="$3"
+config_file="$4"
+
+if [ "$#" -ne "4" ] ; then
+ echo "you called this script with $# params and 4 are needed"
+ exit 1
+fi
 
 if [ -e ~/.pagure-${config_file}.cfg ] ;then
   source ~/.pagure-${config_file}.cfg
@@ -14,5 +25,6 @@ else
   exit 1
 fi
 
+echo "Calling pagure API for project ${repo}"
 curl -H "Authorization: token ${pagure_token}" -H "Content-Type: application/x-www-form-urlencoded" -X POST -d "name=${repo}&description=${description}&namespace=${namespace}" "${pagure_url}/api/0/new/"
 
