@@ -712,7 +712,7 @@ declare -A ansible_fqcn_mapping=(
 )
 
 # List of modules/tasks that have also same parameter name so to be reviewed !
-ansible_conflicting_modules="replace"
+ansible_conflicting_modules="user group replace shell"
 # File to modify and check if exist
 if [ -z "$1" ]; then
   usage
@@ -727,7 +727,7 @@ for key in ${!ansible_fqcn_mapping[@]} ; do
   if [ "$?" -eq "0" ] ; then
     echo "Ansible module [$key] found in $1"
     echo " => replacing [$key] with [${ansible_fqcn_mapping[${key}]}]"
-    sed -i "s/ ${key}:/ ${ansible_fqcn_mapping[${key}]}:/g" $file
+    sed -i "s/ ${key}:$/ ${ansible_fqcn_mapping[${key}]}:/g" $file
     echo ${ansible_conflicting_modules}|grep -q ${key}
     if [ "$?" -eq "0" ]; then
     echo "=== [WARNING] : Verify manually as ${key} can mean a module but also a parameter !"
