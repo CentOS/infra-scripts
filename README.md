@@ -12,4 +12,5 @@ Organized in folders by type of scripts
 ## Opennebula
  * os-to-one: quickly export from openstack (as snapshot) an instance and import it opennebula
 
-
+## Ansible
+ * convert-ansible-tasks-to-fqcn: simple bash script to convert existing .yml tasks files to FQCN through mapping 

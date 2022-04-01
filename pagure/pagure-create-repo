@@ -4,6 +4,7 @@ read -p "Pagure Git project name to create : " repo
 read -p "Project Description: " description
 read -p "Pagure namespace (like 'rpms'): " namespace
 read -p "Which environment (like 'dev'): " config_file
+read -p "Private repo (True|False) : " private_repo
 
 if [ -e ~/.pagure-${config_file}.cfg ] ;then
   source ~/.pagure-${config_file}.cfg
@@ -14,5 +15,5 @@ else
   exit 1
 fi
 
-curl -H "Authorization: token ${pagure_token}" -H "Content-Type: application/x-www-form-urlencoded" -X POST -d "name=${repo}&description=${description}&namespace=${namespace}" "${pagure_url}/api/0/new/"
+curl -H "Authorization: token ${pagure_token}" -H "Content-Type: application/x-www-form-urlencoded" -X POST -d "name=${repo}&description=${description}&namespace=${namespace}&private=${private_repo}" "${pagure_url}/api/0/new/"
 
