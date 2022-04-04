@@ -5,7 +5,7 @@
 # We first declare through array the old name and the new FQCN (collection.name.module_name)
 # See below in the ansible_fqcn_mapping
 # Warning : this script is stupid, so just test your changes in a dev/staging branch and review before git commit 
-# Last update: 2022-04-01
+# Last update: 2022-04-04
 # Imported collections mapping: 
 #  ansible.builtin
 #  ansible.posix
@@ -14,6 +14,7 @@
 #  community.mysql
 #  community.postgresql
 #  containers.podman
+#  ansible.netcommon
 
 
 # Functions
@@ -709,6 +710,31 @@ declare -A ansible_fqcn_mapping=(
    ["podman_tag"]="containers.podman.podman_tag" 
    ["podman_volume_info"]="containers.podman.podman_volume_info" 
    ["podman_volume"]="containers.podman.podman_volume" 
+   ["cli_command"]="ansible.netcommon.cli_command" 
+   ["cli_config"]="ansible.netcommon.cli_config" 
+   ["cli_parse"]="ansible.netcommon.cli_parse" 
+   ["net_banner"]="ansible.netcommon.net_banner" 
+   ["netconf_config"]="ansible.netcommon.netconf_config" 
+   ["netconf_get"]="ansible.netcommon.netconf_get" 
+   ["netconf_rpc"]="ansible.netcommon.netconf_rpc" 
+   ["net_get"]="ansible.netcommon.net_get" 
+   ["net_interface"]="ansible.netcommon.net_interface" 
+   ["net_l2_interface"]="ansible.netcommon.net_l2_interface" 
+   ["net_l3_interface"]="ansible.netcommon.net_l3_interface" 
+   ["net_linkagg"]="ansible.netcommon.net_linkagg" 
+   ["net_lldp_interface"]="ansible.netcommon.net_lldp_interface" 
+   ["net_lldp"]="ansible.netcommon.net_lldp" 
+   ["net_logging"]="ansible.netcommon.net_logging" 
+   ["net_ping"]="ansible.netcommon.net_ping" 
+   ["net_put"]="ansible.netcommon.net_put" 
+   ["net_static_route"]="ansible.netcommon.net_static_route" 
+   ["net_system"]="ansible.netcommon.net_system" 
+   ["net_user"]="ansible.netcommon.net_user" 
+   ["net_vlan"]="ansible.netcommon.net_vlan" 
+   ["net_vrf"]="ansible.netcommon.net_vrf" 
+   ["restconf_config"]="ansible.netcommon.restconf_config" 
+   ["restconf_get"]="ansible.netcommon.restconf_get" 
+   ["telnet"]="ansible.netcommon.telnet" 
 )
 
 # List of modules/tasks that have also same parameter name so to be reviewed !
