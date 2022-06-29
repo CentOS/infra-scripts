@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Call this script in for batch and while read loop
+# $1: namespace (like 'rpms')
+# $2: project (like 'kernel')
+# $3: fas group to grant 'commit' rights (like 'sig-hyperscale')
+# $4: config_file to use like ~/.pagure-${config_file} (like 'prod')
+
+namespace="$1"
+repo="$2"
+fas_group="$3"
+config_file="$4"
+
+if [ "$#" -ne "4" ] ; then
+ echo "you called this script with $# params and 4 are needed"
+ exit 1
+fi
+
+if [ -e ~/.pagure-${config_file}.cfg ] ;then
+  source ~/.pagure-${config_file}.cfg
+else
+  echo "You need to create a ~/.pagure-${config_file}.cfg file with the following settings:"
+  echo "pagure_url=    # main url like https://git.dev.centos.org"
+  echo "pagure_token=  # your pagure API token for that instance"
+  exit 1
+fi
+
+echo "Calling pagure API for project ${repo}"
+curl -H "Authorization: token ${pagure_token}" -H "Content-Type: application/x-www-form-urlencoded" -X POST -d "user_type=group&name=${fas_group}&acl=commit" "${pagure_url}/api/0/${namespace}/${repo}/git/modifyacls"
+
+
