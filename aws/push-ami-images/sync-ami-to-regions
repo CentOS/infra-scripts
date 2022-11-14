@@ -1,0 +1,141 @@
+#!/bin/bash
+
+#
+# Purposes: This simple script/wrapper will:
+#  - copy an existing (tested) AMI image from us-east-2 region
+#  - modify permission to make it "public"
+#  - create wiki-formated and website-formated files that can be used for wiki/www and share AMI IDs
+#
+# Requirements:
+#  - IAM user with rights to copy AMI image and modify permissions
+#  - awscli pkg installed and configured (with ~/.aws/config and ~/.aws/credentials)
+#
+
+# First some variables 
+logfile="$HOME/sync-ami-to-regions.log"
+ami_wiki_log="$HOME/ami_wiki.log"
+ami_csv_log="$HOME/ami_csv.log"
+
+# Specific and needed for deployment : they *should* already exist at us-east-2 region
+# Consult Infra and Releng team for any questions
+now=$(date +%Y%m%d%H%M)
+aws_source_region="us-east-2"
+aws_dest_regions="us-east-1 us-west-1 us-west-2 af-south-1 ap-east-1 ap-south-1 ap-northeast-1 ap-northeast-2 ap-southeast-1 ap-southeast-2 ca-central-1 eu-central-1 eu-west-1 eu-west-2 eu-west-3 eu-south-1 eu-north-1 me-south-1 sa-east-1"
+
+# Some functions
+function usage() {
+cat << EOF
+You need to call the script like this : $0 -arguments
+ -i : existing AMI Image ID to replicate to other regions [required, example: ami-042c4c5b1aa9e50bb]
+ -a : Target Architecture for the image [required, example: x86_64]
+ -n : Target AMI name to use to define image [required, example 'CentOS Stream 9 x86_64']
+ -r : CentOS Linux/Stream release for wiki and website [required, example 'CentOS Stream 8']
+ -h : display this help
+EOF
+
+}
+
+function varcheck() {
+if [ -z "$1" ] ; then
+        usage
+        exit 1
+fi
+}
+
+f_log() {
+   echo "[+] $(date +%Y%m%d-%H:%M) [$0] -> $*" >>$logfile
+   echo "[+] $(date +%Y%m%d-%H:%M) [$0] -> $*" 
+}
+
+f_check() {
+  if [ "$?" -ne "0" ] ;then
+    f_log "ERROR, exiting .. check log $logfile"
+    exit 1
+  fi
+}
+
+# Parsing args
+while getopts "hi:n:a:r:" option
+do
+  case ${option} in
+    h)
+      usage
+      exit 1
+      ;;
+    i)
+     ec2_ami_id=${OPTARG}
+      ;;
+    n)
+     ec2_ami_name=${OPTARG}
+      ;;
+    a)
+     ec2_ami_arch=${OPTARG}
+     ;;
+    r)
+     ec2_centos_release=${OPTARG}
+     ;;
+    ?)
+      usage
+      exit
+      ;;
+  esac
+done
+
+varcheck ${ec2_ami_id}
+varcheck ${ec2_ami_name}
+varcheck ${ec2_ami_arch}
+varcheck ${ec2_centos_release}
+touch $logfile
+
+# Verifying first that we have awscli and config/credentials
+for tool in aws jq ; do
+  f_log "Verifying we have [${tool}] tool in PATH .."
+  which ${tool} >/dev/null 2>&1 
+  f_check
+done
+
+for file in config credentials ; do
+  f_log "Verifying if we have ~/.aws/${file} ..."
+  test -f ~/.aws/${file} 
+  f_check
+done
+
+
+f_log "Starting to copy AMI ID [$ec2_ami_id] from us-east-2 to other regions ..."
+f_log "Validating first source AMI ID [${ec2_ami_id}]"
+aws ec2 wait image-exists --image-ids ${ec2_ami_id}
+f_check
+aws ec2 modify-image-attribute --image-id ${ec2_ami_id} --launch-permission "Add=[{Group=all}]"
+f_check
+
+# Initialize wiki and csv files
+for file in ${ami_wiki_log} ${ami_csv_log};
+do
+  echo "==== starting copying here for new AMI from date [${now}] ====" >> $file
+done
+
+echo "|| ${ec2_ami_name} || ${ec2_centos_release} || us-east-2 || ${ec2_ami_id} || ${ec2_ami_arch} ||" >> ${ami_wiki_log}
+echo \" ${ec2_centos_release} \",\"us-east-2\",\"${ec2_ami_arch}\",\"${ec2_ami_id}\",\"https://console.aws.amazon.com/ec2/v2/home?region=us-east-2#LaunchInstanceWizard:ami=${ec2_ami_id}\" >> ${ami_csv_log}
+
+# Copying to all regions
+for target_region in ${aws_dest_regions} ; do
+  f_log "Copying AMI Id [${ec2_ami_id}] from us-east-2 to [${target_region}] ..."
+  region_ami_id=$(aws ec2 copy-image --source-image-id ${ec2_ami_id} --source-region us-east-2 --region ${target_region} --name "${ec2_ami_name}" |jq .ImageId|tr -d '"')
+  f_check
+  echo "|| ${ec2_ami_name} || ${ec2_centos_release} || ${target_region} || ${region_ami_id} || ${ec2_ami_arch} ||" >> ${ami_wiki_log}
+  echo \" ${ec2_centos_release} \",\"${target_region}\",\"${ec2_ami_arch}\",\"${region_ami_id}\",\"https://console.aws.amazon.com/ec2/v2/home?region=us-east-2#LaunchInstanceWizard:ami=${region_ami_id}\" >> ${ami_csv_log}
+  f_log "Waiting for AMI id [${region_ami_id}] in region [${target_region}] to be availble/imported ..."
+  aws ec2 wait image-available --image-ids ${region_ami_id} --region ${target_region}
+  f_check
+  f_log "Image seems now available to modifying permissions on it ..."
+  aws ec2 modify-image-attribute --image-id ${region_ami_id} --launch-permission "Add=[{Group=all}]" --region ${target_region}
+  f_check
+done
+
+# Ending wiki and csv files section for this copy-and-share ami task 
+for file in ${ami_wiki_log} ${ami_csv_log};
+do
+  echo "==== [END] of section for AMI replicate task from date [${now}] ====" >> $file
+done
+
+

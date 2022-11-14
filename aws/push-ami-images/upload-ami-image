@@ -1,0 +1,183 @@
+#!/bin/bash
+
+#
+# Purposes: This simple script/wrapper will:
+#  - upload a VM image to S3 bucket
+#  - create a snapshot
+#  - register it as AMI in one region (default from fixed variable)
+#  - deploy a t2 instance based on that AMI
+#  - wait for EC2 instance to be available through ssh
+#
+# Requirements:
+#  - S3 bucket and IAM user with rights to push to it and register instance/instantiate it
+#  - awscli pkg installed and configured (with ~/.aws/config and ~/.aws/credentials)
+#  - existing VM image in *raw* format (convert a .qcow2 first to .raw with qemu-img if needed)
+#
+
+# First some variables 
+logfile="$HOME/upload-ami-image.log"
+now=$(date +%Y%m%d%H%M)
+
+# Specific and needed for deployment : they *should* already exist at us-east-2 region
+# Consult Infra and Releng team for any questions
+# You still need a specific ~/.aws/centos-ami.cfg file that will be parsed for following variables :
+# s3_bucket="" # The S3 bucket to upload first to
+# ec2_instance_name="stream-test-$(date +%Y%m%d%H%M)"
+# ec2_instance_ebs_size="40"
+# ec2_keypair="" # the keypair attached to test instance to see if it boots fine and ssh into
+# ec2_security_group="" # security group to apply to test instance
+# ec2_subnet_id="" # in which subnet id (in us-east-2) we'll deploy the ec2 test instance after upload
+# ec2_grouptag="" # which tag to apply on the ec2 instance
+
+# Specific arrays for different architectures
+declare -A ec2_instance_type=( ["x86_64"]="t2.micro" ["aarch64"]="t4g.small")
+declare -A ec2_ami_arch=( ["x86_64"]="x86_64" ["aarch64"]="arm64" )
+
+# Some functions
+function usage() {
+cat << EOF
+You need to call the script like this : $0 -arguments
+ -i : VM raw image to upload to S3 [required, example: CentOS-Stream-ec2-8-20210603.0.aarch64.raw]
+ -a : Target Architecture for the image [required, possible values : x86_64|aarch64]
+ -n : Target AMI name to use to define image [required, example 'CentOS 9 Stream x86_64']
+ -h : display this help
+EOF
+
+}
+
+function varcheck() {
+if [ -z "$1" ] ; then
+        usage
+        exit 1
+fi
+}
+
+f_log() {
+   echo "[+] $(date +%Y%m%d-%H:%M) [$0] -> $*" >>$logfile
+   echo "[+] $(date +%Y%m%d-%H:%M) [$0] -> $*" 
+}
+
+f_check() {
+  if [ "$?" -ne "0" ] ;then
+    f_log "ERROR, exiting .. check log $logfile"
+    exit 1
+  fi
+}
+
+# Parsing args
+while getopts "hi:n:a:" option
+do
+  case ${option} in
+    h)
+      usage
+      exit 1
+      ;;
+    i)
+     ec2_raw_image=${OPTARG}
+      ;;
+    n)
+     ec2_ami_name=${OPTARG}
+      ;;
+    a)
+     ec2_arch=${OPTARG}
+     ;;
+    ?)
+      usage
+      exit
+      ;;
+  esac
+done
+
+varcheck ${ec2_raw_image}
+varcheck ${ec2_ami_name}
+varcheck ${ec2_arch}
+touch $logfile
+
+# Verifying first that we have awscli and config/credentials
+for tool in aws jq ; do
+  f_log "Verifying we have [${tool}] tool in PATH .."
+  which ${tool} >/dev/null 2>&1 
+  f_check
+done
+
+for file in config credentials centos-ami.cfg ; do
+  f_log "Verifying if we have ~/.aws/${file} ..."
+  test -f ~/.aws/${file} 
+  f_check
+done
+
+# Sourcing config file
+source ~/.aws/centos-ami.cfg
+
+
+# Validating arch
+if [[ ${ec2_arch} = "x86_64" || ${ec2_arch} = "aarch64" ]]; then
+  f_log "Architecture [$ec2_arch] is a valid arch"
+else
+  f_log "[ERROR]: architecture should be either 'x86_64' or 'aarch64'"
+  exit 1
+fi
+
+
+f_log "Verifying access to S3 bucket [$s3_bucket] ..."
+aws s3 ls s3://${s3_bucket} >/dev/null 2>&1
+f_check
+
+f_log "Uploading image [${ec2_raw_image}] to S3 bucket [${s3_bucket}] ..."
+aws s3 cp ${ec2_raw_image} s3://${s3_bucket}
+f_check
+
+f_log "Importing now as EC2 snapshot ..."
+import_task_id=$(aws ec2 import-snapshot --description "CentOS image ${ec2_raw_image##*/}" --disk-container "{ \"Description\": \"${ec2_raw_image##*/}\", \"Format\": \"raw\", \"UserBucket\": { \"S3Bucket\": \"${s3_bucket}\", \"S3Key\": \"${ec2_raw_image##*/}\" } }" | jq '.ImportTaskId'|tr -d '"')
+f_check
+
+f_log "EC2 import task ID is : [${import_task_id}]"
+f_log "Waiting for [${import_task_id}] to finish ..."
+
+target_status="completed"
+current_status="unknown" 
+until [ ${current_status} = ${target_status} ] ; do 
+  sleep 5
+  current_status=$(aws ec2 describe-import-snapshot-tasks --import-task-ids ${import_task_id}|jq '.ImportSnapshotTasks[0].SnapshotTaskDetail.Status'|tr -d '"')
+  progress_status=$(aws ec2 describe-import-snapshot-tasks --import-task-ids ${import_task_id}|jq '.ImportSnapshotTasks[0].SnapshotTaskDetail.Progress'|tr -d '"')
+  progress_message=$(aws ec2 describe-import-snapshot-tasks --import-task-ids ${import_task_id}|jq '.ImportSnapshotTasks[0].SnapshotTaskDetail.StatusMessage'|tr -d '"')
+  f_log " => Task status is [${current_status}] with progress level [${progress_status}] and actual task is [$progress_message]"
+done
+
+snapshot_id=$(aws ec2 describe-import-snapshot-tasks --import-task-ids ${import_task_id}|jq '.ImportSnapshotTasks[0].SnapshotTaskDetail.SnapshotId'|tr -d '"')
+f_check
+
+f_log "Creating now new AMI based on snapshot [${snapshot_id}] ..."
+ami_id=$(aws ec2 register-image --architecture "${ec2_ami_arch["${ec2_arch}"]}" --description "${ec2_ami_name}" --name "${ec2_ami_name}" --root-device-name /dev/sda1  --block-device-mappings DeviceName=/dev/sda1,Ebs={SnapshotId=${snapshot_id}} --ena-support --virtualization-type hvm |jq '.ImageId' | tr -d '"')
+f_check
+
+f_log "AMI ID for us-east-2 region is [$ami_id] for image [${ec2_ami_name}]"
+
+# Let's now deploy a EC2 VM/instance based on that AMI we just imported
+f_log "Deploying now a test instance [$ec2_instance_type] from AMI ID [$ami_id] ..."
+ec2_instance_id=$(aws ec2 run-instances --image-id ${ami_id} --count 1 --instance-type "${ec2_instance_type["${ec2_arch}"]}" --key-name ${ec2_keypair} --security-group-ids ${ec2_security_group} --subnet-id ${ec2_subnet_id} --block-device-mapping "[ { \"DeviceName\": \"/dev/sda1\", \"Ebs\": { \"VolumeSize\": ${ec2_instance_ebs_size} } } ]"|jq -r ".Instances[0].InstanceId")
+f_check
+
+# Just waiting for AWS/EC2 to have assigned through their pool/api an ip on instance but not -yet- live
+# Just querying aws for now
+sleep 5
+f_log "Checking Public IP for EC2 instance [${ec2_instance_id}] ..."
+ec2_public_ip=$(aws ec2 describe-instances --instance-ids "${ec2_instance_id}" --query "Reservations[*].Instances[*].PublicIpAddress" --output text)
+f_check
+f_log "Target EC2 instance [${ec2_instance_id}] is assigned public IP [${ec2_public_ip}]"
+f_log "Let's tag that instance with some values ..."
+aws ec2 create-tags --resources ${ec2_instance_id} --tags "Key=FedoraGroup,Value=${ec2_grouptag}"
+aws ec2 create-tags --resources ${ec2_instance_id} --tags "Key=Name,Value=${ec2_instance_name}"
+
+f_log "Waiting now for EC2 instance [${ec2_instance_id}] to be responding to icmp on public ip [${ec2_public_ip}] ..."
+until ping -c1 ${ec2_public_ip} >/dev/null 2>&1; do :; done
+f_log "Waiting for EC2 instance [${ec2_instance_id}] to be responding on sshd port on public ip [${ec2_public_ip}] ..."
+until >/dev/null 2>&1 >/dev/tcp/${ec2_public_ip}/22 ; do :; done
+
+f_log "You can now ssh into [${ec2_public_ip}] with ssh keypair [$ec2_keypair]"
+f_log "[REMINDER] : Don't forget to run command [aws ec2 terminate-instances --instance-ids ${ec2_instance_id}] when you have finished testing the instance"
+f_log ""
+f_log "[IMPORTANT] Write down the AMI id used for this test, as it will be needed for next steps"
+f_log "  AMI ID is : [$ami_id]"
+
+

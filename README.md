@@ -14,3 +14,7 @@ Organized in folders by type of scripts
 
 ## Ansible
  * convert-ansible-tasks-to-fqcn: simple bash script to convert existing .yml tasks files to FQCN through mapping 
+
+## AWS
+ * upload-ami-image: takes a built .raw cloud image, upload to S3 bucket as snapshot, make an AMI and test deploying it
+ * sync-ami-to-regions: asks for previously tested AMI ID, and make it public and sync to 20 AWS regions also producing needed output for www.centos.org/ and wiki content
