@@ -20,7 +20,7 @@ ami_csv_log="$HOME/ami_csv.log"
 # Consult Infra and Releng team for any questions
 now=$(date +%Y%m%d%H%M)
 aws_source_region="us-east-2"
-aws_dest_regions="us-east-1 us-west-1 us-west-2 af-south-1 ap-east-1 ap-south-1 ap-northeast-1 ap-northeast-2 ap-southeast-1 ap-southeast-2 ca-central-1 eu-central-1 eu-west-1 eu-west-2 eu-west-3 eu-south-1 eu-north-1 me-south-1 sa-east-1"
+
 
 # Some functions
 function usage() {
@@ -30,6 +30,7 @@ You need to call the script like this : $0 -arguments
  -a : Target Architecture for the image [required, example: x86_64]
  -n : Target AMI name to use to define image [required, example 'CentOS Stream 9 x86_64']
  -r : CentOS Linux/Stream release for wiki and website [required, example 'CentOS Stream 8']
+ -t : AWS target regions [optional, example 'eu-north-1 eu-south-1', default to all regions in this script]  
  -h : display this help
 EOF
 
@@ -55,7 +56,7 @@ f_check() {
 }
 
 # Parsing args
-while getopts "hi:n:a:r:" option
+while getopts "hi:n:a:r:t:" option
 do
   case ${option} in
     h)
@@ -73,6 +74,9 @@ do
      ;;
     r)
      ec2_centos_release=${OPTARG}
+     ;;
+    t)
+     aws_dest_regions=${OPTARG}
      ;;
     ?)
       usage
@@ -118,13 +122,17 @@ echo "|| ${ec2_ami_name} || ${ec2_centos_release} || us-east-2 || ${ec2_ami_id} 
 echo \" ${ec2_centos_release} \",\"us-east-2\",\"${ec2_ami_arch}\",\"${ec2_ami_id}\",\"https://console.aws.amazon.com/ec2/v2/home?region=us-east-2#LaunchInstanceWizard:ami=${ec2_ami_id}\" >> ${ami_csv_log}
 
 # Copying to all regions
+if [ -z "${aws_dest_regions}" ] ; then
+  aws_dest_regions="us-east-1 us-west-1 us-west-2 af-south-1 ap-east-1 ap-south-1 ap-northeast-1 ap-northeast-2 ap-southeast-1 ap-southeast-2 ca-central-1 eu-central-1 eu-west-1 eu-west-2 eu-west-3 eu-south-1 me-south-1 sa-east-1 eu-north-1"
+fi
+
 for target_region in ${aws_dest_regions} ; do
   f_log "Copying AMI Id [${ec2_ami_id}] from us-east-2 to [${target_region}] ..."
   region_ami_id=$(aws ec2 copy-image --source-image-id ${ec2_ami_id} --source-region us-east-2 --region ${target_region} --name "${ec2_ami_name}" |jq .ImageId|tr -d '"')
   f_check
   echo "|| ${ec2_ami_name} || ${ec2_centos_release} || ${target_region} || ${region_ami_id} || ${ec2_ami_arch} ||" >> ${ami_wiki_log}
-  echo \" ${ec2_centos_release} \",\"${target_region}\",\"${ec2_ami_arch}\",\"${region_ami_id}\",\"https://console.aws.amazon.com/ec2/v2/home?region=us-east-2#LaunchInstanceWizard:ami=${region_ami_id}\" >> ${ami_csv_log}
-  f_log "Waiting for AMI id [${region_ami_id}] in region [${target_region}] to be availble/imported ..."
+  echo \" ${ec2_centos_release} \",\"${target_region}\",\"${ec2_ami_arch}\",\"${region_ami_id}\",\"https://console.aws.amazon.com/ec2/v2/home?region=${target_region}#LaunchInstanceWizard:ami=${region_ami_id}\" >> ${ami_csv_log}
+  f_log "Waiting for AMI id [${region_ami_id}] in region [${target_region}] to be available/imported ..."
   aws ec2 wait image-available --image-ids ${region_ami_id} --region ${target_region}
   f_check
   f_log "Image seems now available to modifying permissions on it ..."
